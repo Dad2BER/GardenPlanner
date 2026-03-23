@@ -291,7 +291,8 @@ function addFloatingLabel(shape) {
     fontSize: 14, fontFamily: 'system-ui, sans-serif', fontWeight: 'bold',
     fill: 'white',
     shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.65)', blur: 4, offsetX: 1, offsetY: 1 }),
-    selectable: false, evented: false, textAlign: 'center',
+    selectable: false, evented: false,
+    originX: 'center', originY: 'center',  // position = center point, no width math needed
   });
   _canvas.add(label);
   _labels.set(shape, label);
@@ -301,7 +302,8 @@ function addFloatingLabel(shape) {
 function syncLabel(shape, label) {
   if (!label) return;
   const c = shape.getCenterPoint();
-  label.set({ left: c.x - label.width / 2, top: c.y - label.height / 2 });
+  label.set({ left: c.x, top: c.y });
+  label.setCoords();
 }
 
 function syncAllLabels() {
