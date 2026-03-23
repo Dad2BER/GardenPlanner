@@ -111,21 +111,25 @@ function initCanvas(garden) {
   _canvas = new fabric.Canvas('garden-canvas', {
     width:    W,
     height:   H,
-    backgroundColor: '#6b5c3e',   // outside-garden colour
+    backgroundColor: '#6b5c3e',
     selection: true,
     preserveObjectStacking: true,
   });
 
-  drawGardenSurface();
-  drawGrid();
-  fitToGarden();   // set initial zoom before loading shapes
-
-  // Load existing layout
   if (garden.layout?.canvasJson) {
+    // loadFromJSON replaces ALL canvas objects, so draw the grid inside the
+    // callback after loading, then layer beds on top.
     _canvas.loadFromJSON(garden.layout.canvasJson, () => {
-      _canvas.getObjects().forEach(obj => {
-        if (obj.bedId) addFloatingLabel(obj);
-      });
+      const beds = _canvas.getObjects().filter(o => o.bedId);
+
+      // Rebuild canvas in correct z-order: grid → beds → labels
+      _canvas.clear();
+      _canvas.backgroundColor = '#6b5c3e';
+      drawGardenSurface();
+      drawGrid();
+      beds.forEach(obj => { _canvas.add(obj); addFloatingLabel(obj); });
+
+      fitToGarden();
       _canvas.renderAll();
       updateBedList();
     }, (o, fabricObj) => {
@@ -136,6 +140,10 @@ function initCanvas(garden) {
         fabricObj.bedFill = o.bedFill;
       }
     });
+  } else {
+    drawGardenSurface();
+    drawGrid();
+    fitToGarden();
   }
 
   bindCanvasEvents();
@@ -160,9 +168,14 @@ function drawGrid() {
   const minor = GRID_SIZE;          // 1 ft
   const major = GRID_SIZE * 5;      // 5 ft
 
-  const lineBase = { selectable: false, evented: false, isGrid: true, hoverCursor: 'default' };
-  const minorOpts = { ...lineBase, stroke: 'rgba(0,0,0,0.10)', strokeWidth: 0.5 };
-  const majorOpts = { ...lineBase, stroke: 'rgba(0,0,0,0.25)', strokeWidth: 1 };
+  // strokeUniform: true keeps stroke width constant in SCREEN pixels regardless of zoom,
+  // so lines stay visible even when zoomed out to fit the full 50×50ft garden.
+  const lineBase = {
+    selectable: false, evented: false, isGrid: true,
+    hoverCursor: 'default', strokeUniform: true,
+  };
+  const minorOpts = { ...lineBase, stroke: 'rgba(0,0,0,0.18)', strokeWidth: 1 };
+  const majorOpts = { ...lineBase, stroke: 'rgba(0,0,0,0.40)', strokeWidth: 1.5 };
 
   for (let x = 0; x <= GARDEN_PX; x += minor) {
     const opts = x % major === 0 ? majorOpts : minorOpts;
@@ -175,15 +188,15 @@ function drawGrid() {
 
   // Foot labels at every 5-ft mark
   const labelBase = {
-    fontSize: 9, fontFamily: 'system-ui, sans-serif',
-    fill: 'rgba(0,0,0,0.38)',
+    fontSize: 10, fontFamily: 'system-ui, sans-serif',
+    fill: 'rgba(0,0,0,0.45)',
     selectable: false, evented: false, isGrid: true, hoverCursor: 'default',
   };
   for (let x = 5; x <= GARDEN_FT; x += 5) {
-    _canvas.add(new fabric.Text(`${x}'`, { ...labelBase, left: x * GRID_SIZE + 2, top: 2 }));
+    _canvas.add(new fabric.Text(`${x}'`, { ...labelBase, left: x * GRID_SIZE + 3, top: 3 }));
   }
   for (let y = 5; y <= GARDEN_FT; y += 5) {
-    _canvas.add(new fabric.Text(`${y}'`, { ...labelBase, left: 2, top: y * GRID_SIZE + 2 }));
+    _canvas.add(new fabric.Text(`${y}'`, { ...labelBase, left: 3, top: y * GRID_SIZE + 3 }));
   }
 
   // Garden border
@@ -191,7 +204,7 @@ function drawGrid() {
     left: 0, top: 0,
     width: GARDEN_PX, height: GARDEN_PX,
     fill: 'transparent',
-    stroke: 'rgba(0,0,0,0.45)', strokeWidth: 2,
+    stroke: 'rgba(0,0,0,0.60)', strokeWidth: 2, strokeUniform: true,
     selectable: false, evented: false, isGrid: true, hoverCursor: 'default',
   }));
 }
