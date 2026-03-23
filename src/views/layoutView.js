@@ -1,27 +1,35 @@
 import { getGarden, updateGardenLayout } from '../state.js';
 
-// Module-level canvas state (destroyed/recreated on each navigation to this page)
-let _canvas    = null;
-let _gardenId  = null;
-let _labels    = new Map();   // fabric shape → fabric.Text label
-let _saveTimer = null;
+// ── Constants ─────────────────────────────────────────────────────────────────
+const GRID_SIZE  = 40;           // px per foot at zoom 1
+const GARDEN_FT  = 50;           // garden is 50 ft × 50 ft
+const GARDEN_PX  = GRID_SIZE * GARDEN_FT;  // 2000 px virtual size
+const ZOOM_MIN   = 0.08;
+const ZOOM_MAX   = 5;
+
+// ── Module state ──────────────────────────────────────────────────────────────
+let _canvas     = null;
+let _gardenId   = null;
+let _labels     = new Map();   // fabric shape → fabric.Text label
+let _saveTimer  = null;
+let _isPanning  = false;
+let _panStart   = { x: 0, y: 0 };
+let _spaceDown  = false;
 
 const BED_COLORS = [
   '#3a7d44', '#4a9e5c', '#2d6a4f', '#52b788',
   '#6a994e', '#a7c957', '#386641', '#bc4749',
 ];
 let _colorIdx = 0;
+function nextColor() { return BED_COLORS[_colorIdx++ % BED_COLORS.length]; }
 
-function nextColor() {
-  return BED_COLORS[_colorIdx++ % BED_COLORS.length];
-}
-
-// ── Public entry point ───────────────────────────────────────────────────────
+// ── Public entry point ────────────────────────────────────────────────────────
 
 export function renderLayoutView(container, gardenId, navigate) {
-  _gardenId = gardenId;
-  _labels   = new Map();
-  _colorIdx = 0;
+  _gardenId  = gardenId;
+  _labels    = new Map();
+  _colorIdx  = 0;
+  _spaceDown = false;
 
   const garden = getGarden(gardenId);
   if (!garden) {
@@ -31,18 +39,18 @@ export function renderLayoutView(container, gardenId, navigate) {
 
   container.innerHTML = `
     <div class="layout-wrap">
+
       <div class="layout-toolbar">
         <span class="toolbar-label">Add Bed:</span>
-        <button class="tool-btn" id="btn-add-rect" title="Add rectangle bed">
-          ▭ Rectangle
-        </button>
-        <button class="tool-btn" id="btn-add-circle" title="Add circle/ellipse bed">
-          ◯ Circle
-        </button>
+        <button class="tool-btn" id="btn-add-rect"   title="Add rectangle bed (4ft × 8ft)">▭ Rectangle</button>
+        <button class="tool-btn" id="btn-add-circle" title="Add circle bed (4ft diameter)">◯ Circle</button>
         <div class="toolbar-sep"></div>
-        <button class="tool-btn tool-btn--danger" id="btn-delete-bed" title="Delete selected bed (Del)">
-          🗑 Delete
-        </button>
+        <button class="tool-btn tool-btn--danger" id="btn-delete-bed" title="Delete selected bed (Del)">🗑 Delete</button>
+        <div class="toolbar-sep"></div>
+        <button class="tool-btn tool-btn--icon" id="btn-zoom-out"  title="Zoom out">−</button>
+        <span  class="zoom-indicator" id="zoom-indicator">—</span>
+        <button class="tool-btn tool-btn--icon" id="btn-zoom-in"   title="Zoom in">+</button>
+        <button class="tool-btn" id="btn-zoom-fit" title="Fit garden to window">⊡ Fit</button>
         <div class="toolbar-spacer"></div>
         <span class="toolbar-hint" id="layout-hint">Click a bed to select · Double-click to rename</span>
         <span class="toolbar-save" id="layout-save-status">✓ Saved</span>
@@ -52,14 +60,19 @@ export function renderLayoutView(container, gardenId, navigate) {
         <div class="layout-sidebar">
           <div class="bed-list-header">Beds</div>
           <div class="bed-list" id="bed-list"></div>
-          <div class="bed-list-empty hidden" id="bed-list-empty">No beds yet</div>
+          <div class="bed-list-empty" id="bed-list-empty">No beds yet.<br>Add one above.</div>
         </div>
-        <div class="layout-canvas-wrap">
-          <canvas id="garden-canvas"></canvas>
+        <div class="layout-canvas-outer">
+          <div class="layout-canvas-wrap">
+            <canvas id="garden-canvas"></canvas>
+          </div>
+          <div class="layout-scale-bar">
+            <span>1 square = 1 ft &nbsp;·&nbsp; Garden: ${GARDEN_FT}ft × ${GARDEN_FT}ft</span>
+            <span>Scroll to zoom &nbsp;·&nbsp; Space or Alt + drag to pan</span>
+          </div>
         </div>
       </div>
 
-      <!-- Inline rename overlay -->
       <div class="rename-overlay hidden" id="rename-overlay">
         <div class="rename-box">
           <label class="rename-label">Bed Name</label>
@@ -73,18 +86,17 @@ export function renderLayoutView(container, gardenId, navigate) {
     </div>
   `;
 
-  // Wait for Fabric.js to be available (it's a CDN script, not a module)
   waitForFabric(() => initCanvas(garden));
 }
 
-// ── Fabric.js initialisation ─────────────────────────────────────────────────
+// ── Fabric.js init ─────────────────────────────────────────────────────────────
 
 function waitForFabric(cb) {
-  if (typeof fabric !== 'undefined') { cb(); return; }
-  let attempts = 0;
+  if (typeof fabric !== 'undefined') { requestAnimationFrame(cb); return; }
+  let n = 0;
   const t = setInterval(() => {
-    if (typeof fabric !== 'undefined') { clearInterval(t); cb(); }
-    if (++attempts > 40) { clearInterval(t); console.error('Fabric.js not loaded'); }
+    if (typeof fabric !== 'undefined') { clearInterval(t); requestAnimationFrame(cb); }
+    if (++n > 50) { clearInterval(t); console.error('Fabric.js not loaded'); }
   }, 100);
 }
 
@@ -92,32 +104,31 @@ function initCanvas(garden) {
   const el = document.getElementById('garden-canvas');
   if (!el) return;
 
-  // Size canvas to fill its wrapper
   const wrap = el.parentElement;
-  const W = wrap.clientWidth  || 800;
-  const H = wrap.clientHeight || 600;
+  const W = wrap.clientWidth  || 900;
+  const H = wrap.clientHeight || 620;
 
   _canvas = new fabric.Canvas('garden-canvas', {
-    width:           W,
-    height:          H,
-    backgroundColor: '#c8b560',
-    selection:       true,
+    width:    W,
+    height:   H,
+    backgroundColor: '#6b5c3e',   // outside-garden colour
+    selection: true,
     preserveObjectStacking: true,
   });
 
-  drawGrid(_canvas);
+  drawGardenSurface();
+  drawGrid();
+  fitToGarden();   // set initial zoom before loading shapes
 
   // Load existing layout
   if (garden.layout?.canvasJson) {
     _canvas.loadFromJSON(garden.layout.canvasJson, () => {
-      // Rebuild floating labels for all bed shapes
       _canvas.getObjects().forEach(obj => {
         if (obj.bedId) addFloatingLabel(obj);
       });
       _canvas.renderAll();
       updateBedList();
     }, (o, fabricObj) => {
-      // Per-object reviver: restore custom props
       if (o.bedId) {
         fabricObj.bedId   = o.bedId;
         fabricObj.bedName = o.bedName;
@@ -129,66 +140,121 @@ function initCanvas(garden) {
 
   bindCanvasEvents();
   bindToolbar();
+  bindKeyboard();
   updateBedList();
 }
 
-// ── Grid ─────────────────────────────────────────────────────────────────────
+// ── Garden surface + grid ─────────────────────────────────────────────────────
 
-function drawGrid(canvas) {
-  const step = 40;
-  const W = canvas.getWidth();
-  const H = canvas.getHeight();
-  const opts = {
-    stroke: 'rgba(0,0,0,0.12)',
-    strokeWidth: 1,
-    selectable: false,
-    evented: false,
-    isGrid: true,
-    hoverCursor: 'default',
+function drawGardenSurface() {
+  // Filled rect representing the 50×50 ft soil area
+  _canvas.add(new fabric.Rect({
+    left: 0, top: 0,
+    width: GARDEN_PX, height: GARDEN_PX,
+    fill: '#c8b560',
+    selectable: false, evented: false, isGrid: true, hoverCursor: 'default',
+  }));
+}
+
+function drawGrid() {
+  const minor = GRID_SIZE;          // 1 ft
+  const major = GRID_SIZE * 5;      // 5 ft
+
+  const lineBase = { selectable: false, evented: false, isGrid: true, hoverCursor: 'default' };
+  const minorOpts = { ...lineBase, stroke: 'rgba(0,0,0,0.10)', strokeWidth: 0.5 };
+  const majorOpts = { ...lineBase, stroke: 'rgba(0,0,0,0.25)', strokeWidth: 1 };
+
+  for (let x = 0; x <= GARDEN_PX; x += minor) {
+    const opts = x % major === 0 ? majorOpts : minorOpts;
+    _canvas.add(new fabric.Line([x, 0, x, GARDEN_PX], opts));
+  }
+  for (let y = 0; y <= GARDEN_PX; y += minor) {
+    const opts = y % major === 0 ? majorOpts : minorOpts;
+    _canvas.add(new fabric.Line([0, y, GARDEN_PX, y], opts));
+  }
+
+  // Foot labels at every 5-ft mark
+  const labelBase = {
+    fontSize: 9, fontFamily: 'system-ui, sans-serif',
+    fill: 'rgba(0,0,0,0.38)',
+    selectable: false, evented: false, isGrid: true, hoverCursor: 'default',
   };
-  for (let x = step; x < W; x += step) {
-    canvas.add(new fabric.Line([x, 0, x, H], { ...opts }));
+  for (let x = 5; x <= GARDEN_FT; x += 5) {
+    _canvas.add(new fabric.Text(`${x}'`, { ...labelBase, left: x * GRID_SIZE + 2, top: 2 }));
   }
-  for (let y = step; y < H; y += step) {
-    canvas.add(new fabric.Line([0, y, W, y], { ...opts }));
+  for (let y = 5; y <= GARDEN_FT; y += 5) {
+    _canvas.add(new fabric.Text(`${y}'`, { ...labelBase, left: 2, top: y * GRID_SIZE + 2 }));
   }
-  // Foot markers (every 4 cells = 4 ft if 1 cell = 1 ft)
-  // Labels at left edge
-  canvas.sendToBack(canvas.getObjects('line')[0]);
+
+  // Garden border
+  _canvas.add(new fabric.Rect({
+    left: 0, top: 0,
+    width: GARDEN_PX, height: GARDEN_PX,
+    fill: 'transparent',
+    stroke: 'rgba(0,0,0,0.45)', strokeWidth: 2,
+    selectable: false, evented: false, isGrid: true, hoverCursor: 'default',
+  }));
+}
+
+// ── Zoom helpers ──────────────────────────────────────────────────────────────
+
+function fitToGarden() {
+  const W  = _canvas.getWidth();
+  const H  = _canvas.getHeight();
+  const pad = 32;
+  const zoom = Math.min((W - pad * 2) / GARDEN_PX, (H - pad * 2) / GARDEN_PX);
+  const panX = (W - GARDEN_PX * zoom) / 2;
+  const panY = (H - GARDEN_PX * zoom) / 2;
+  _canvas.setViewportTransform([zoom, 0, 0, zoom, panX, panY]);
+  updateZoomIndicator();
+}
+
+function zoomBy(factor) {
+  const cx = _canvas.getWidth()  / 2;
+  const cy = _canvas.getHeight() / 2;
+  const z  = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, _canvas.getZoom() * factor));
+  _canvas.zoomToPoint(new fabric.Point(cx, cy), z);
+  updateZoomIndicator();
+}
+
+function updateZoomIndicator() {
+  const el = document.getElementById('zoom-indicator');
+  if (el) el.textContent = Math.round(_canvas.getZoom() * 100) + '%';
 }
 
 // ── Bed creation ──────────────────────────────────────────────────────────────
 
+function getViewportCenter() {
+  const vpt  = _canvas.viewportTransform;
+  const zoom = _canvas.getZoom();
+  return {
+    x: (_canvas.getWidth()  / 2 - vpt[4]) / zoom,
+    y: (_canvas.getHeight() / 2 - vpt[5]) / zoom,
+  };
+}
+
 function createBed(type) {
   const id   = crypto.randomUUID();
-  const name = `Bed ${(_canvas.getObjects().filter(o => o.bedId).length) + 1}`;
+  const name = `Bed ${_canvas.getObjects().filter(o => o.bedId).length + 1}`;
   const fill = nextColor();
-  const cx   = _canvas.getWidth()  / 2;
-  const cy   = _canvas.getHeight() / 2;
+  const c    = getViewportCenter();
 
   let shape;
   if (type === 'rect') {
+    // Default: 4ft wide × 8ft tall raised bed (160 × 320 px)
     shape = new fabric.Rect({
-      left:        cx - 80,
-      top:         cy - 50,
-      width:       160,
-      height:      100,
-      fill,
-      stroke:      'rgba(0,0,0,0.4)',
-      strokeWidth: 2,
-      rx: 4, ry: 4,
-      opacity:     0.92,
+      left: c.x - 80, top: c.y - 160,
+      width: 160, height: 320,
+      fill, stroke: 'rgba(0,0,0,0.35)', strokeWidth: 2,
+      rx: 4, ry: 4, opacity: 0.92,
     });
   } else {
+    // Default: 4ft-diameter circle (rx=ry=80 px)
     shape = new fabric.Ellipse({
-      left:        cx - 70,
-      top:         cy - 50,
-      rx:          70,
-      ry:          50,
-      fill,
-      stroke:      'rgba(0,0,0,0.4)',
-      strokeWidth: 2,
-      opacity:     0.92,
+      left: c.x - 80, top: c.y - 80,
+      rx: 80, ry: 80,
+      fill, stroke: 'rgba(0,0,0,0.35)', strokeWidth: 2,
+      opacity: 0.92,
     });
   }
 
@@ -209,14 +275,10 @@ function createBed(type) {
 
 function addFloatingLabel(shape) {
   const label = new fabric.Text(shape.bedName || '', {
-    fontSize:   14,
-    fontFamily: 'system-ui, sans-serif',
-    fontWeight: 'bold',
-    fill:       'white',
-    shadow:     new fabric.Shadow({ color: 'rgba(0,0,0,0.6)', blur: 3, offsetX: 1, offsetY: 1 }),
-    selectable: false,
-    evented:    false,
-    textAlign:  'center',
+    fontSize: 14, fontFamily: 'system-ui, sans-serif', fontWeight: 'bold',
+    fill: 'white',
+    shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.65)', blur: 4, offsetX: 1, offsetY: 1 }),
+    selectable: false, evented: false, textAlign: 'center',
   });
   _canvas.add(label);
   _labels.set(shape, label);
@@ -225,23 +287,17 @@ function addFloatingLabel(shape) {
 
 function syncLabel(shape, label) {
   if (!label) return;
-  const center = shape.getCenterPoint();
-  label.set({
-    left: center.x - label.width / 2,
-    top:  center.y - label.height / 2,
-  });
+  const c = shape.getCenterPoint();
+  label.set({ left: c.x - label.width / 2, top: c.y - label.height / 2 });
 }
 
 function syncAllLabels() {
-  _labels.forEach((label, shape) => syncLabel(shape, label));
+  _labels.forEach((lbl, shape) => syncLabel(shape, lbl));
 }
 
 function removeLabel(shape) {
-  const label = _labels.get(shape);
-  if (label) {
-    _canvas.remove(label);
-    _labels.delete(shape);
-  }
+  const lbl = _labels.get(shape);
+  if (lbl) { _canvas.remove(lbl); _labels.delete(shape); }
 }
 
 // ── Canvas events ─────────────────────────────────────────────────────────────
@@ -252,35 +308,84 @@ function bindCanvasEvents() {
   _canvas.on('object:rotating', e => { if (e.target.bedId) syncLabel(e.target, _labels.get(e.target)); });
   _canvas.on('object:modified', () => { syncAllLabels(); scheduleSave(); updateBedList(); });
 
+  _canvas.on('selection:created', e => updateHint(e.selected?.[0]));
+  _canvas.on('selection:updated', e => updateHint(e.selected?.[0]));
+  _canvas.on('selection:cleared', () => updateHint(null));
+
   _canvas.on('mouse:dblclick', e => {
     const target = _canvas.findTarget(e.e);
     if (target?.bedId) startRename(target);
   });
 
-  _canvas.on('selection:created', e => updateHint(e.selected?.[0]));
-  _canvas.on('selection:updated', e => updateHint(e.selected?.[0]));
-  _canvas.on('selection:cleared', () => updateHint(null));
+  // ── Zoom via mouse wheel ──────────────────────────────────────────────────
+  _canvas.on('mouse:wheel', opt => {
+    const e = opt.e;
+    let z = _canvas.getZoom() * (0.999 ** e.deltaY);
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    _canvas.zoomToPoint(new fabric.Point(e.offsetX, e.offsetY), z);
+    updateZoomIndicator();
+    e.preventDefault();
+    e.stopPropagation();
+  });
 
-  // Delete key
-  document.addEventListener('keydown', onKeyDown);
+  // ── Pan via Alt+drag or middle-mouse drag ─────────────────────────────────
+  _canvas.on('mouse:down', opt => {
+    const e = opt.e;
+    if (e.altKey || e.button === 1 || _spaceDown) {
+      _isPanning = true;
+      _panStart  = { x: e.clientX, y: e.clientY };
+      _canvas.selection = false;
+      _canvas.setCursor('grabbing');
+      e.preventDefault();
+    }
+  });
+
+  _canvas.on('mouse:move', opt => {
+    if (!_isPanning) return;
+    const e = opt.e;
+    _canvas.relativePan(new fabric.Point(e.clientX - _panStart.x, e.clientY - _panStart.y));
+    _panStart = { x: e.clientX, y: e.clientY };
+  });
+
+  _canvas.on('mouse:up', () => {
+    if (_isPanning) {
+      _isPanning = false;
+      _canvas.selection = true;
+      _canvas.setCursor(_spaceDown ? 'grab' : 'default');
+    }
+  });
 }
+
+// ── Keyboard ──────────────────────────────────────────────────────────────────
 
 function onKeyDown(e) {
   if (!_canvas) return;
-  if ((e.key === 'Delete' || e.key === 'Backspace') &&
-      !['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) {
+  const inField = ['INPUT','TEXTAREA'].includes(document.activeElement?.tagName);
+
+  if (e.code === 'Space' && !inField) {
+    if (!_spaceDown) {
+      _spaceDown = true;
+      _canvas.setCursor('grab');
+    }
+    e.preventDefault();
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !inField) {
     deleteSelected();
+  }
+  if (e.key === 'Enter' && _renamingShape) confirmRename();
+  if (e.key === 'Escape' && _renamingShape) cancelRename();
+}
+
+function onKeyUp(e) {
+  if (e.code === 'Space') {
+    _spaceDown = false;
+    if (_canvas && !_isPanning) _canvas.setCursor('default');
   }
 }
 
-function updateHint(obj) {
-  const el = document.getElementById('layout-hint');
-  if (!el) return;
-  if (obj?.bedId) {
-    el.textContent = `"${obj.bedName}" selected · Double-click to rename · Del to delete`;
-  } else {
-    el.textContent = 'Click a bed to select · Double-click to rename';
-  }
+function bindKeyboard() {
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup',   onKeyUp);
 }
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
@@ -289,6 +394,9 @@ function bindToolbar() {
   document.getElementById('btn-add-rect')?.addEventListener('click', () => createBed('rect'));
   document.getElementById('btn-add-circle')?.addEventListener('click', () => createBed('circle'));
   document.getElementById('btn-delete-bed')?.addEventListener('click', deleteSelected);
+  document.getElementById('btn-zoom-in')?.addEventListener('click', () => zoomBy(1.25));
+  document.getElementById('btn-zoom-out')?.addEventListener('click', () => zoomBy(1 / 1.25));
+  document.getElementById('btn-zoom-fit')?.addEventListener('click', fitToGarden);
 }
 
 function deleteSelected() {
@@ -300,6 +408,14 @@ function deleteSelected() {
   _canvas.renderAll();
   scheduleSave();
   updateBedList();
+}
+
+function updateHint(obj) {
+  const el = document.getElementById('layout-hint');
+  if (!el) return;
+  el.textContent = obj?.bedId
+    ? `"${obj.bedName}" selected · Double-click to rename · Del to delete`
+    : 'Click a bed to select · Double-click to rename';
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────
@@ -318,12 +434,11 @@ function startRename(shape) {
 }
 
 function confirmRename() {
-  const input = document.getElementById('rename-input');
-  const name  = input?.value.trim();
-  if (!name || !_renamingShape) return cancelRename();
+  const name = document.getElementById('rename-input')?.value.trim();
+  if (!name || !_renamingShape) { cancelRename(); return; }
   _renamingShape.bedName = name;
-  const label = _labels.get(_renamingShape);
-  if (label) { label.set('text', name); syncLabel(_renamingShape, label); }
+  const lbl = _labels.get(_renamingShape);
+  if (lbl) { lbl.set('text', name); syncLabel(_renamingShape, lbl); }
   _canvas.renderAll();
   scheduleSave();
   updateBedList();
@@ -335,14 +450,10 @@ function cancelRename() {
   _renamingShape = null;
 }
 
-// Wire rename overlay buttons (called once after innerHTML is set)
+// Rename button events wired via delegation on document
 document.addEventListener('click', e => {
   if (e.target.id === 'rename-confirm') confirmRename();
   if (e.target.id === 'rename-cancel')  cancelRename();
-});
-document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && _renamingShape) confirmRename();
-  if (e.key === 'Escape' && _renamingShape) cancelRename();
 });
 
 // ── Bed list sidebar ──────────────────────────────────────────────────────────
@@ -353,13 +464,8 @@ function updateBedList() {
   if (!list || !_canvas) return;
 
   const beds = _canvas.getObjects().filter(o => o.bedId);
+  empty.style.display = beds.length === 0 ? 'block' : 'none';
 
-  if (beds.length === 0) {
-    list.innerHTML = '';
-    empty?.classList.remove('hidden');
-    return;
-  }
-  empty?.classList.add('hidden');
   list.innerHTML = beds.map(b => `
     <div class="bed-item" data-bed-id="${b.bedId}">
       <span class="bed-swatch" style="background:${b.fill}"></span>
@@ -369,8 +475,7 @@ function updateBedList() {
 
   list.querySelectorAll('.bed-item').forEach(el => {
     el.addEventListener('click', () => {
-      const id  = el.dataset.bedId;
-      const obj = _canvas.getObjects().find(o => o.bedId === id);
+      const obj = _canvas.getObjects().find(o => o.bedId === el.dataset.bedId);
       if (obj) { _canvas.setActiveObject(obj); _canvas.renderAll(); }
     });
   });
@@ -386,38 +491,31 @@ function scheduleSave() {
 
 function doSave() {
   if (!_canvas || !_gardenId) return;
-  // Serialize only bed shapes (not grid lines, not labels)
   const shapes = _canvas.getObjects().filter(o => o.bedId);
   const beds   = shapes.map(o => ({ id: o.bedId, name: o.bedName, type: o.bedType, fill: o.fill }));
-
-  // Create a temporary canvas clone with only bed objects to get clean JSON
-  const json = _canvas.toJSON(['bedId', 'bedName', 'bedType', 'bedFill', 'isGrid']);
-  // Strip grid lines and labels from the JSON
+  const json   = _canvas.toJSON(['bedId', 'bedName', 'bedType', 'bedFill', 'isGrid']);
   json.objects = (json.objects || []).filter(o => o.bedId);
-
   updateGardenLayout(_gardenId, { canvasJson: json, beds });
   setSaveStatus('saved');
 }
 
-function setSaveStatus(status) {
+function setSaveStatus(s) {
   const el = document.getElementById('layout-save-status');
   if (!el) return;
-  if (status === 'saving') {
-    el.textContent = '● Saving…';
-    el.style.color = '#a0522d';
-  } else {
-    el.textContent = '✓ Saved';
-    el.style.color = '#2d6a4f';
-  }
+  el.textContent = s === 'saving' ? '● Saving…' : '✓ Saved';
+  el.style.color = s === 'saving' ? '#a0522d' : '#2d6a4f';
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 
 export function destroyLayoutView() {
   document.removeEventListener('keydown', onKeyDown);
+  document.removeEventListener('keyup',   onKeyUp);
   if (_canvas) { _canvas.dispose(); _canvas = null; }
-  _labels   = new Map();
-  _gardenId = null;
+  _labels    = new Map();
+  _gardenId  = null;
+  _spaceDown = false;
+  _isPanning = false;
   clearTimeout(_saveTimer);
 }
 
