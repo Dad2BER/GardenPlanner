@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GardenPlanner</title>
+  <!-- Fabric.js v5 — canvas library for the layout designer -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green-900: #1b4332;
+      --green-700: #2d6a4f;
+      --green-600: #388659;
+      --green-500: #40916c;
+      --green-400: #52b788;
+      --green-300: #74c69d;
+      --green-100: #d8f3dc;
+      --green-50:  #f0faf2;
+      --earth-700: #6b4226;
+      --earth-500: #a0522d;
+      --earth-300: #c8a882;
+      --earth-100: #f5ead8;
+      --red-500:   #c0392b;
+      --red-100:   #fde8e8;
+      --text-900:  #1a1a1a;
+      --text-600:  #4a5568;
+      --text-400:  #9aa5b4;
+      --surface:   #ffffff;
+      --bg:        #f0faf2;
+      --border:    #c6e8d1;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.10);
+      --radius:    8px;
+      --radius-lg: 12px;
+      --header-h:  56px;
+      --sidebar-w: 220px;
+      --font:      system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: var(--font);
+      font-size: 14px;
+      color: var(--text-900);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── App Shell ────────────────────────────────────────────────────────── */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────────────── */
+    #app-header {
+      height: var(--header-h);
+      background: var(--green-700);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 10;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-btn {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: -0.3px;
+      padding: 4px 8px;
+      border-radius: var(--radius);
+      transition: background 0.15s;
+    }
+    .logo-btn:hover { background: rgba(255,255,255,0.12); }
+
+    .breadcrumb-sep {
+      color: var(--green-300);
+      font-size: 18px;
+      font-weight: 300;
+    }
+
+    .breadcrumb-garden {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--green-100);
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .header-nav { display: flex; gap: 4px; }
+
+    .nav-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.80);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 6px 14px;
+      border-radius: var(--radius);
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-btn:hover       { background: rgba(255,255,255,0.12); color: white; }
+    .nav-btn--active     { background: rgba(255,255,255,0.18); color: white; }
+
+    /* ── Main Layout ──────────────────────────────────────────────────────── */
+    #app-main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────────────────── */
+    #app-sidebar {
+      width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow-y: auto;
+      padding: 12px 0;
+    }
+
+    .sidebar-section { margin-bottom: 8px; }
+
+    .sidebar-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-400);
+      padding: 4px 16px 6px;
+    }
+
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      background: none;
+      border: none;
+      text-align: left;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-600);
+      padding: 8px 16px;
+      cursor: pointer;
+      border-radius: 0;
+      transition: background 0.12s, color 0.12s;
+    }
+    .sidebar-item:hover         { background: var(--green-50); color: var(--green-700); }
+    .sidebar-item--active       { background: var(--green-100); color: var(--green-700); font-weight: 600; }
+    .sidebar-item--soon         { opacity: 0.55; cursor: default; }
+    .sidebar-item--soon:hover   { background: none; color: var(--text-600); }
+
+    .badge-soon {
+      margin-left: auto;
+      font-size: 10px;
+      background: var(--earth-100);
+      color: var(--earth-500);
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    .sidebar-back { padding: 4px 8px 8px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+    .sidebar-back-btn {
+      background: none;
+      border: none;
+      color: var(--green-600);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: var(--radius);
+    }
+    .sidebar-back-btn:hover { background: var(--green-50); }
+
+    /* ── Content Area ─────────────────────────────────────────────────────── */
+    #app-content {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 28px 32px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Buttons ──────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--font);
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.14s, opacity 0.14s, box-shadow 0.14s;
+      white-space: nowrap;
+    }
+    .btn-primary { background: var(--green-600); color: white; }
+    .btn-primary:hover { background: var(--green-700); box-shadow: 0 2px 6px rgba(40,100,60,0.25); }
+    .btn-ghost   { background: transparent; color: var(--text-600); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--bg); }
+    .btn-danger  { background: var(--red-500); color: white; }
+    .btn-danger:hover { opacity: 0.88; }
+    .btn-sm      { padding: 5px 12px; font-size: 12.5px; }
+
+    .hidden { display: none !important; }
+
+    /* ── Page Header ──────────────────────────────────────────────────────── */
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .page-title    { font-size: 22px; font-weight: 700; color: var(--text-900); }
+    .page-subtitle { font-size: 13px; color: var(--text-400); margin-top: 2px; }
+
+    /* ── Create Garden Form ───────────────────────────────────────────────── */
+    .create-form-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      margin-bottom: 28px;
+      box-shadow: var(--shadow-md);
+      max-width: 520px;
+    }
+
+    .create-form-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: var(--green-700);
+    }
+
+    .form-group   { margin-bottom: 14px; }
+    .form-label   { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-600); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .form-input   { width: 100%; padding: 9px 12px; border: 1.5px solid var(--border); border-radius: var(--radius); font-family: var(--font); font-size: 14px; color: var(--text-900); background: var(--bg); transition: border-color 0.15s; }
+    .form-input:focus { outline: none; border-color: var(--green-500); background: white; }
+    .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+
+    /* ── Garden Grid ──────────────────────────────────────────────────────── */
+    .garden-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 18px;
+    }
+
+    .garden-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: var(--shadow-sm);
+      transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .garden-card:hover { box-shadow: var(--shadow-md); border-color: var(--green-300); }
+
+    .garden-card-icon  { font-size: 28px; }
+    .garden-card-body  { flex: 1; }
+    .garden-card-name  { font-size: 16px; font-weight: 700; color: var(--text-900); margin-bottom: 4px; }
+    .garden-card-desc  { font-size: 13px; color: var(--text-600); margin-bottom: 6px; }
+    .garden-card-meta  { font-size: 12px; color: var(--text-400); }
+    .garden-card-actions { display: flex; gap: 8px; align-items: center; }
+
+    /* ── Empty State ──────────────────────────────────────────────────────── */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      max-width: 400px;
+      margin: 0 auto;
+    }
+    .empty-icon   { font-size: 48px; margin-bottom: 16px; }
+    .empty-title  { font-size: 20px; font-weight: 700; color: var(--text-900); margin-bottom: 8px; }
+    .empty-desc   { font-size: 14px; color: var(--text-600); margin-bottom: 24px; line-height: 1.6; }
+
+    /* ── Stub Page ────────────────────────────────────────────────────────── */
+    .stub-page {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--text-400);
+    }
+    .stub-icon { font-size: 40px; margin-bottom: 16px; }
+    .stub-page h2 { font-size: 18px; font-weight: 700; color: var(--text-600); margin-bottom: 8px; }
+    .stub-page p  { font-size: 14px; }
+
+    /* ── Layout Designer ──────────────────────────────────────────────────── */
+
+    /* Override content padding for layout page */
+    #app-content:has(.layout-wrap) {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .layout-wrap {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: relative;
+    }
+
+    /* Toolbar */
+    .layout-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-label {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-400);
+      margin-right: 2px;
+    }
+
+    .tool-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 14px;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--green-700);
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .tool-btn:hover        { background: var(--green-50); border-color: var(--green-400); }
+    .tool-btn--danger      { color: var(--red-500); }
+    .tool-btn--danger:hover { background: var(--red-100); border-color: var(--red-500); }
+
+    .toolbar-sep   { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+    .toolbar-spacer { flex: 1; }
+
+    .toolbar-hint {
+      font-size: 12px;
+      color: var(--text-400);
+      font-style: italic;
+    }
+
+    .toolbar-save {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--green-700);
+      margin-left: 6px;
+    }
+
+    /* Layout body */
+    .layout-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Bed list sidebar */
+    .layout-sidebar {
+      width: 180px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .bed-list-header {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-400);
+      padding: 10px 14px 6px;
+    }
+
+    .bed-list { padding: 4px 8px; }
+    .bed-list-empty {
+      font-size: 12px;
+      color: var(--text-400);
+      padding: 8px 14px;
+      font-style: italic;
+    }
+
+    .bed-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-600);
+      transition: background 0.12s;
+    }
+    .bed-item:hover { background: var(--green-50); color: var(--green-700); }
+
+    .bed-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .bed-item-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Canvas wrapper */
+    .layout-canvas-wrap {
+      flex: 1;
+      overflow: hidden;
+      background: #8b7355;
+      display: flex;
+      align-items: stretch;
+      position: relative;
+    }
+
+    .layout-canvas-wrap canvas { display: block; }
+
+    /* Rename overlay */
+    .rename-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.40);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .rename-box {
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      width: 320px;
+      box-shadow: var(--shadow-md);
+    }
+
+    .rename-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-400);
+      margin-bottom: 8px;
+    }
+
+    .rename-input {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-family: var(--font);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-900);
+      margin-bottom: 16px;
+    }
+    .rename-input:focus { outline: none; border-color: var(--green-500); }
+
+    .rename-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ── Error ────────────────────────────────────────────────────────────── */
+    .error-msg {
+      color: var(--red-500);
+      padding: 20px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header id="app-header"></header>
+    <div id="app-main">
+      <aside id="app-sidebar"></aside>
+      <main id="app-content"></main>
+    </div>
+  </div>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
