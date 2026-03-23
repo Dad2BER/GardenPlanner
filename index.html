@@ -449,7 +449,15 @@
       white-space: nowrap;
     }
 
-    /* Canvas wrapper — see .layout-canvas-outer below */
+    /* Canvas wrapper */
+    .layout-canvas-wrap {
+      flex: 1;
+      overflow: hidden;
+      position: relative;   /* anchors the overlaid scrollbars */
+      display: flex;
+      align-items: stretch;
+    }
+    .layout-canvas-wrap canvas { display: block; }
 
     /* Rename overlay */
     .rename-overlay {
@@ -531,6 +539,55 @@
     }
 
     .layout-canvas-wrap canvas { display: block; }
+
+    /* ── Scrollbars (overlaid on canvas edges) ────────────────────────────── */
+    .scrollbar-v,
+    .scrollbar-h {
+      position: absolute;
+      z-index: 20;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.15);
+      transition: opacity 0.15s;
+    }
+    .scrollbar-v:hover, .scrollbar-h:hover { background: rgba(0,0,0,0.22); }
+
+    .scrollbar-v {
+      right: 3px;
+      top: 3px;
+      bottom: 3px;
+      width: 10px;
+    }
+    .scrollbar-h {
+      left: 3px;
+      right: 3px;
+      bottom: 3px;
+      height: 10px;
+    }
+
+    .scrollbar-v-thumb,
+    .scrollbar-h-thumb {
+      position: absolute;
+      background: rgba(0,0,0,0.42);
+      border-radius: 5px;
+      transition: background 0.12s;
+    }
+    .scrollbar-v-thumb:hover,
+    .scrollbar-h-thumb:hover { background: rgba(0,0,0,0.60); }
+    .scrollbar-v-thumb:active,
+    .scrollbar-h-thumb:active { background: rgba(0,0,0,0.72); cursor: grabbing; }
+
+    .scrollbar-v-thumb {
+      width: 100%;
+      min-height: 24px;
+      cursor: grab;
+      left: 0;
+    }
+    .scrollbar-h-thumb {
+      height: 100%;
+      min-width: 24px;
+      cursor: grab;
+      top: 0;
+    }
 
     /* ── Scale bar ────────────────────────────────────────────────────────── */
     .layout-scale-bar {

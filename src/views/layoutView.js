@@ -65,6 +65,12 @@ export function renderLayoutView(container, gardenId, navigate) {
         <div class="layout-canvas-outer">
           <div class="layout-canvas-wrap">
             <canvas id="garden-canvas"></canvas>
+            <div class="scrollbar-v hidden" id="scrollbar-v">
+              <div class="scrollbar-v-thumb" id="thumb-v"></div>
+            </div>
+            <div class="scrollbar-h hidden" id="scrollbar-h">
+              <div class="scrollbar-h-thumb" id="thumb-h"></div>
+            </div>
           </div>
           <div class="layout-scale-bar">
             <span>1 square = 1 ft &nbsp;·&nbsp; Garden: ${GARDEN_FT}ft × ${GARDEN_FT}ft</span>
@@ -149,6 +155,7 @@ function initCanvas(garden) {
   bindCanvasEvents();
   bindToolbar();
   bindKeyboard();
+  bindScrollbars();
   updateBedList();
 }
 
@@ -318,6 +325,7 @@ function removeLabel(shape) {
 // ── Canvas events ─────────────────────────────────────────────────────────────
 
 function bindCanvasEvents() {
+  _canvas.on('after:render',    updateScrollbars);
   _canvas.on('object:moving',   e => { if (e.target.bedId) syncLabel(e.target, _labels.get(e.target)); });
   _canvas.on('object:scaling',  e => { if (e.target.bedId) syncLabel(e.target, _labels.get(e.target)); });
   _canvas.on('object:rotating', e => { if (e.target.bedId) syncLabel(e.target, _labels.get(e.target)); });
@@ -519,6 +527,107 @@ function setSaveStatus(s) {
   if (!el) return;
   el.textContent = s === 'saving' ? '● Saving…' : '✓ Saved';
   el.style.color = s === 'saving' ? '#a0522d' : '#2d6a4f';
+}
+
+// ── Scrollbars ────────────────────────────────────────────────────────────────
+
+function updateScrollbars() {
+  const sbV = document.getElementById('scrollbar-v');
+  const sbH = document.getElementById('scrollbar-h');
+  if (!sbV || !sbH || !_canvas) return;
+
+  const zoom    = _canvas.getZoom();
+  const vpt     = _canvas.viewportTransform;
+  const cW      = _canvas.getWidth();
+  const cH      = _canvas.getHeight();
+  const gardenW = GARDEN_PX * zoom;
+  const gardenH = GARDEN_PX * zoom;
+
+  const needH = gardenW > cW + 1;
+  const needV = gardenH > cH + 1;
+
+  sbH.classList.toggle('hidden', !needH);
+  sbV.classList.toggle('hidden', !needV);
+
+  if (needH) {
+    const trackW  = sbH.clientWidth;
+    const thumbW  = Math.max(24, (cW / gardenW) * trackW);
+    const maxPan  = gardenW - cW;
+    const scrollX = Math.max(0, Math.min(1, -vpt[4] / maxPan));
+    const thumbX  = scrollX * (trackW - thumbW);
+    const thumb   = document.getElementById('thumb-h');
+    if (thumb) { thumb.style.width = thumbW + 'px'; thumb.style.left = thumbX + 'px'; }
+  }
+
+  if (needV) {
+    const trackH  = sbV.clientHeight;
+    const thumbH  = Math.max(24, (cH / gardenH) * trackH);
+    const maxPan  = gardenH - cH;
+    const scrollY = Math.max(0, Math.min(1, -vpt[5] / maxPan));
+    const thumbY  = scrollY * (trackH - thumbH);
+    const thumb   = document.getElementById('thumb-v');
+    if (thumb) { thumb.style.height = thumbH + 'px'; thumb.style.top = thumbY + 'px'; }
+  }
+}
+
+function bindScrollbars() {
+  bindScrollbar('h');
+  bindScrollbar('v');
+}
+
+function bindScrollbar(axis) {
+  const isH     = axis === 'h';
+  const trackEl = document.getElementById(`scrollbar-${axis}`);
+  const thumbEl = document.getElementById(`thumb-${axis}`);
+  if (!trackEl || !thumbEl) return;
+
+  // Drag the thumb
+  thumbEl.addEventListener('mousedown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startCursor  = isH ? e.clientX : e.clientY;
+    const startPan     = _canvas.viewportTransform[isH ? 4 : 5];
+    const trackSize    = isH ? trackEl.clientWidth  : trackEl.clientHeight;
+    const thumbSize    = parseFloat(isH ? thumbEl.style.width : thumbEl.style.height) || 24;
+    const zoom         = _canvas.getZoom();
+    const gardenSize   = GARDEN_PX * zoom;
+    const canvasSize   = isH ? _canvas.getWidth() : _canvas.getHeight();
+    const maxPan       = gardenSize - canvasSize;
+
+    const onMove = ev => {
+      const delta      = (isH ? ev.clientX : ev.clientY) - startCursor;
+      const scrollDelta = delta / (trackSize - thumbSize) * maxPan;
+      const newPan     = Math.min(0, Math.max(-maxPan, startPan - scrollDelta));
+      const vpt        = _canvas.viewportTransform.slice();
+      vpt[isH ? 4 : 5] = newPan;
+      _canvas.setViewportTransform(vpt);
+      _canvas.renderAll();
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
+  });
+
+  // Click on track to jump
+  trackEl.addEventListener('click', e => {
+    if (e.target === thumbEl) return;
+    const rect       = trackEl.getBoundingClientRect();
+    const clickPos   = isH ? e.clientX - rect.left : e.clientY - rect.top;
+    const trackSize  = isH ? trackEl.clientWidth  : trackEl.clientHeight;
+    const thumbSize  = parseFloat(isH ? thumbEl.style.width : thumbEl.style.height) || 24;
+    const zoom       = _canvas.getZoom();
+    const gardenSize = GARDEN_PX * zoom;
+    const canvasSize = isH ? _canvas.getWidth() : _canvas.getHeight();
+    const maxPan     = gardenSize - canvasSize;
+    const ratio      = Math.max(0, Math.min(1, (clickPos - thumbSize / 2) / (trackSize - thumbSize)));
+    const vpt        = _canvas.viewportTransform.slice();
+    vpt[isH ? 4 : 5] = -(ratio * maxPan);
+    _canvas.setViewportTransform(vpt);
+    _canvas.renderAll();
+  });
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────
