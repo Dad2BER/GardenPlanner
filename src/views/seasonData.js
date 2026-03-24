@@ -17,6 +17,7 @@ export const PLANTS = [
   { key: 'radish',        label: 'Radish'        },
   { key: 'onion',         label: 'Onion'         },
   { key: 'chive',         label: 'Chive'         },
+  { key: 'basil',         label: 'Basil'         },
 ];
 
 /**
@@ -144,6 +145,16 @@ export function plantIconInner(key) {
       <circle cx="16" cy="4"  r="2.5" fill="#9f7aea"/>
       <circle cx="21" cy="5"  r="2.5" fill="#805ad5"/>
       <circle cx="24" cy="8"  r="2.5" fill="#9f7aea"/>`;
+
+    case 'basil': return `
+      <path d="M22 12 C25 10 27 13 26 17 C25 21 22 23 20 21 C22 19 23 16 22 12Z" fill="#2f855a"/>
+      <path d="M10 12 C7 10 5 13 6 17 C7 21 10 23 12 21 C10 19 9 16 10 12Z"     fill="#276749"/>
+      <path d="M16 5 C20 5 24 9 24 15 C24 21 20 25 16 25 C12 25 8 21 8 15 C8 9 12 5 16 5Z" fill="#38a169"/>
+      <line x1="16" y1="6"  x2="16" y2="24" stroke="#276749" stroke-width="0.9" opacity="0.55"/>
+      <path d="M16 11 C14 12 12 13 11 15 M16 11 C18 12 20 13 21 15" fill="none" stroke="#276749" stroke-width="0.7" opacity="0.45"/>
+      <path d="M16 16 C14 17 12 18 11 20 M16 16 C18 17 20 18 21 20" fill="none" stroke="#276749" stroke-width="0.7" opacity="0.45"/>
+      <ellipse cx="13" cy="13" rx="1.5" ry="3" fill="white" opacity="0.2"/>
+      <line x1="16" y1="25" x2="16" y2="29" stroke="#744210" stroke-width="2" stroke-linecap="round"/>`;
 
     default:
       return `<circle cx="16" cy="16" r="12" fill="#a0aec0"/>`;
