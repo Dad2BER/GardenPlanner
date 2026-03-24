@@ -2,6 +2,7 @@ import { initState, getGarden, subscribe } from './state.js';
 import { loadData } from './services/storage.js';
 import { renderGardensView } from './views/gardensView.js';
 import { renderLayoutView, destroyLayoutView } from './views/layoutView.js';
+import { renderSeasonView } from './views/seasonView.js';
 
 // ── View state ────────────────────────────────────────────────────────────────
 
@@ -97,10 +98,10 @@ function renderSidebar() {
     <div class="sidebar-section">
       <div class="sidebar-label">Garden</div>
       ${pages.map(p => `
-        <button class="sidebar-item ${_view.page === p.id ? 'sidebar-item--active' : ''} ${['season','history','costs','notes','calendar'].includes(p.id) ? 'sidebar-item--soon' : ''}"
+        <button class="sidebar-item ${_view.page === p.id ? 'sidebar-item--active' : ''} ${['history','costs','notes','calendar'].includes(p.id) ? 'sidebar-item--soon' : ''}"
                 data-page="${p.id}">
           ${p.icon} ${p.label}
-          ${['season','history','costs','notes','calendar'].includes(p.id) ? '<span class="badge-soon">soon</span>' : ''}
+          ${['history','costs','notes','calendar'].includes(p.id) ? '<span class="badge-soon">soon</span>' : ''}
         </button>
       `).join('')}
     </div>
@@ -111,7 +112,7 @@ function renderSidebar() {
   sidebar.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
       const page = btn.dataset.page;
-      if (['season','history','costs','notes','calendar'].includes(page)) return; // stubs
+      if (['history','costs','notes','calendar'].includes(page)) return; // stubs
       navigate({ page, gardenId: _view.gardenId });
     });
   });
@@ -128,6 +129,13 @@ function renderContent() {
     case 'layout':
       if (_view.gardenId) {
         renderLayoutView(content, _view.gardenId, navigate);
+      } else {
+        navigate({ page: 'gardens' });
+      }
+      break;
+    case 'season':
+      if (_view.gardenId) {
+        renderSeasonView(content, _view.gardenId);
       } else {
         navigate({ page: 'gardens' });
       }

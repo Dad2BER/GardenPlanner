@@ -83,9 +83,14 @@ export function renderLayoutView(container, gardenId, navigate) {
         <div class="rename-box">
           <label class="rename-label">Bed Name</label>
           <input class="rename-input" id="rename-input" type="text" maxlength="40" />
+          <label class="rename-label" style="margin-top:4px;">Color</label>
+          <div class="rename-color-row">
+            <input class="rename-color-input" id="rename-color" type="color" />
+            <span class="rename-color-hint" id="rename-color-hint"></span>
+          </div>
           <div class="rename-actions">
             <button class="btn btn-ghost btn-sm" id="rename-cancel">Cancel</button>
-            <button class="btn btn-primary btn-sm" id="rename-confirm">Rename</button>
+            <button class="btn btn-primary btn-sm" id="rename-confirm">Save</button>
           </div>
         </div>
       </div>
@@ -225,6 +230,35 @@ function fitToGarden() {
   const zoom = Math.min((W - pad * 2) / GARDEN_PX, (H - pad * 2) / GARDEN_PX);
   const panX = (W - GARDEN_PX * zoom) / 2;
   const panY = (H - GARDEN_PX * zoom) / 2;
+  _canvas.setViewportTransform([zoom, 0, 0, zoom, panX, panY]);
+  updateZoomIndicator();
+}
+
+function fitToBeds() {
+  const beds = _canvas.getObjects().filter(o => o.bedId);
+  if (!beds.length) { fitToGarden(); return; }
+
+  // Compute union bounding box in canvas coordinates (zoom-independent)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  beds.forEach(b => {
+    const r = b.getBoundingRect(true); // true = use absolute coords (ignores viewport)
+    if (r.left            < minX) minX = r.left;
+    if (r.top             < minY) minY = r.top;
+    if (r.left + r.width  > maxX) maxX = r.left + r.width;
+    if (r.top  + r.height > maxY) maxY = r.top  + r.height;
+  });
+
+  const W = _canvas.getWidth();
+  const H = _canvas.getHeight();
+  const pad  = 48;
+  const boxW = maxX - minX;
+  const boxH = maxY - minY;
+  const zoom = Math.min(
+    Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, (W - pad * 2) / boxW)),
+    Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, (H - pad * 2) / boxH))
+  );
+  const panX = W / 2 - (minX + boxW / 2) * zoom;
+  const panY = H / 2 - (minY + boxH / 2) * zoom;
   _canvas.setViewportTransform([zoom, 0, 0, zoom, panX, panY]);
   updateZoomIndicator();
 }
@@ -419,7 +453,7 @@ function bindToolbar() {
   document.getElementById('btn-delete-bed')?.addEventListener('click', deleteSelected);
   document.getElementById('btn-zoom-in')?.addEventListener('click', () => zoomBy(1.25));
   document.getElementById('btn-zoom-out')?.addEventListener('click', () => zoomBy(1 / 1.25));
-  document.getElementById('btn-zoom-fit')?.addEventListener('click', fitToGarden);
+  document.getElementById('btn-zoom-fit')?.addEventListener('click', fitToBeds);
 }
 
 function deleteSelected() {
@@ -447,19 +481,28 @@ let _renamingShape = null;
 
 function startRename(shape) {
   _renamingShape = shape;
-  const overlay = document.getElementById('rename-overlay');
-  const input   = document.getElementById('rename-input');
+  const overlay     = document.getElementById('rename-overlay');
+  const input       = document.getElementById('rename-input');
+  const colorInput  = document.getElementById('rename-color');
+  const colorHint   = document.getElementById('rename-color-hint');
   if (!overlay || !input) return;
   input.value = shape.bedName || '';
+  if (colorInput) colorInput.value = shape.fill || shape.bedFill || '#3a7d44';
+  if (colorHint)  colorHint.textContent = shape.bedName || '';
   overlay.classList.remove('hidden');
   input.focus();
   input.select();
 }
 
 function confirmRename() {
-  const name = document.getElementById('rename-input')?.value.trim();
+  const name  = document.getElementById('rename-input')?.value.trim();
+  const color = document.getElementById('rename-color')?.value;
   if (!name || !_renamingShape) { cancelRename(); return; }
   _renamingShape.bedName = name;
+  if (color) {
+    _renamingShape.set('fill', color);
+    _renamingShape.bedFill = color;
+  }
   const lbl = _labels.get(_renamingShape);
   if (lbl) { lbl.set('text', name); syncLabel(_renamingShape, lbl); }
   _canvas.renderAll();
@@ -489,17 +532,38 @@ function updateBedList() {
   const beds = _canvas.getObjects().filter(o => o.bedId);
   empty.style.display = beds.length === 0 ? 'block' : 'none';
 
-  list.innerHTML = beds.map(b => `
+  list.innerHTML = beds.map(b => {
+    let dims;
+    if (b.bedType === 'rect') {
+      const w = Math.round(b.width  * (b.scaleX || 1) / GRID_SIZE);
+      const h = Math.round(b.height * (b.scaleY || 1) / GRID_SIZE);
+      dims = `(${w}' by ${h}')`;
+    } else {
+      const r = Math.round(b.rx * (b.scaleX || 1) / GRID_SIZE);
+      dims = `(r=${r}')`;
+    }
+    return `
     <div class="bed-item" data-bed-id="${b.bedId}">
       <span class="bed-swatch" style="background:${b.fill}"></span>
       <span class="bed-item-name">${escHtml(b.bedName)}</span>
-    </div>
-  `).join('');
+      <span class="bed-item-dims">${dims}</span>
+      <button class="bed-edit-btn" data-bed-id="${b.bedId}" title="Rename / recolor">✏</button>
+    </div>`;
+  }).join('');
 
   list.querySelectorAll('.bed-item').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', e => {
+      if (e.target.classList.contains('bed-edit-btn')) return; // handled separately
       const obj = _canvas.getObjects().find(o => o.bedId === el.dataset.bedId);
       if (obj) { _canvas.setActiveObject(obj); _canvas.renderAll(); }
+    });
+  });
+
+  list.querySelectorAll('.bed-edit-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const obj = _canvas.getObjects().find(o => o.bedId === btn.dataset.bedId);
+      if (obj) startRename(obj);
     });
   });
 }
